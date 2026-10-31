@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CPU Instruction Cycle Simulator</title>
+<style>
+:root{--bg:#f3f6f4;--card:#fff;--ink:#16221d;--mute:#5c6b64;--line:#cfdad4;--fetch:#1f6feb;--dec:#b7791f;--exe:#1a7f4b;--hl:#fff3b0;color-scheme:light dark}
+@media (prefers-color-scheme:dark){:root{--bg:#10171a;--card:#182126;--ink:#e6eeea;--mute:#9bb0a7;--line:#2c3b42;--fetch:#5aa2ff;--dec:#f0b84d;--exe:#4cd18a;--hl:#4a4310}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:"Segoe UI",system-ui,sans-serif;line-height:1.5}
+.wrap{max-width:1000px;margin:0 auto;padding:20px 16px 40px}
+h1{font-size:1.6rem;margin:0 0 4px}
+p.sub{margin:0 0 18px;color:var(--mute)}
+h2{font-size:1.05rem;margin:0 0 10px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media(max-width:760px){.grid{grid-template-columns:1fr}}
+.card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:14px}
+.full{grid-column:1/-1}
+label{display:block;font-size:.85rem;color:var(--mute);margin:8px 0 3px}
+textarea,input,select{width:100%;font:inherit;font-family:Consolas,monospace;font-size:.9rem;background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:6px 8px}
+textarea{height:130px;resize:vertical}
+button{font:inherit;border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:6px;padding:7px 14px;cursor:pointer}
+button.main{background:var(--exe);color:#fff;border-color:var(--exe)}
+button:focus-visible,textarea:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--fetch);outline-offset:2px}
+.btns{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.phases{display:flex;gap:8px;margin-bottom:12px}
+.ph{flex:1;text-align:center;padding:8px;border:2px solid var(--line);border-radius:6px;color:var(--mute);font-weight:600}
+.ph.on.f{border-color:var(--fetch);color:var(--fetch);background:color-mix(in srgb,var(--fetch) 12%,transparent)}
+.ph.on.d{border-color:var(--dec);color:var(--dec);background:color-mix(in srgb,var(--dec) 12%,transparent)}
+.ph.on.e{border-color:var(--exe);color:var(--exe);background:color-mix(in srgb,var(--exe) 12%,transparent)}
+.regs{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.reg{border:1px solid var(--line);border-radius:6px;padding:6px 8px;transition:background .3s}
+.reg b{display:block;font-size:.8rem;color:var(--mute);font-weight:600}
+.reg span{font-family:Consolas,monospace;font-size:1.05rem}
+.reg.chg{background:var(--hl)}
+.now{font-family:Consolas,monospace;padding:8px 10px;border-left:4px solid var(--line);background:var(--bg);margin-top:10px;min-height:42px}
+.mem{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+.cell{border:1px solid var(--line);border-radius:6px;padding:4px 6px;font-family:Consolas,monospace;font-size:.82rem;min-height:44px}
+.cell i{display:block;font-style:normal;color:var(--mute);font-size:.72rem}
+.cell.pc{border-color:var(--fetch);border-width:2px}
+.cell.acc{background:var(--hl)}
+#log{height:200px;overflow:auto;font-family:Consolas,monospace;font-size:.82rem;background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:6px 8px}
+#log div{padding:1px 0}
+.lf{color:var(--fetch)}.ld{color:var(--dec)}.le{color:var(--exe)}
+.hint{font-size:.82rem;color:var(--mute);margin-top:8px}
+code{font-family:Consolas,monospace}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>CPU Instruction Cycle Simulator</h1>
+  <p class="sub">Fetch, decode and execute, shown one micro-step at a time. Edit the program, memory size and speed, then press Step.</p>
+
+  <div class="grid">
+    <!-- INPUT -->
+    <div class="card">
+      <h2>Input: program and settings</h2>
+      <label for="prog">Program (one instruction per line, loaded from address 0)</label>
+      <textarea id="prog" spellcheck="false">LOAD 12
+ADD 13
+SUB 14
+STORE 15
+HALT</textarea>
+      <label for="data">Data (<code>address=value</code>, one per line)</label>
+      <textarea id="data" spellcheck="false" style="height:80px">12=10
+13=5
+14=3</textarea>
+      <label for="size">Memory size</label>
+      <select id="size"><option>16</option><option>32</option><option>8</option></select>
+      <label for="speed">Run speed: <span id="spv">600</span> ms per micro-step</label>
+      <input type="range" id="speed" min="100" max="1500" step="100" value="600">
+      <div class="btns">
+        <button class="main" id="load">Load / Reset</button>
+        <button id="step">Step</button>
+        <button id="run">Run</button>
+        <button id="stop">Pause</button>
+      </div>
+      <div class="hint">Instructions: <code>LOAD a</code>, <code>ADD a</code>, <code>SUB a</code>, <code>STORE a</code>, <code>JUMP a</code>, <code>JZ a</code> (jump if ACC is 0), <code>HALT</code>. Here <code>a</code> is a memory address.</div>
+    </div>
+
+    <!-- CPU -->
+    <div class="card">
+      <h2>CPU</h2>
+      <div class="phases">
+        <div class="ph f" id="pf">Fetch</div>
+        <div class="ph d" id="pd">Decode</div>
+        <div class="ph e" id="pe">Execute</div>
+      </div>
+      <div class="regs" id="regs"></div>
+      <div class="now" id="now">Press Load / Reset, then Step.</div>
+      <div class="hint" id="stats">Instructions done: 0 | Micro-steps: 0</div>
+    </div>
+
+    <!-- MEMORY -->
+    <div class="card">
+      <h2>Memory (blue border = PC points here)</h2>
+      <div class="mem" id="mem"></div>
+    </div>
+
+    <!-- LOG -->
+    <div class="card">
+      <h2>Output: step log</h2>
+      <div id="log"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ---------- State ---------- */
+let S, timer = null;
+const $ = id => document.getElementById(id);
+const REGS = ["PC","MAR","MDR","IR","ACC"];
+
+function parseCell(t){            // memory holds either an instruction (text) or a number
+  t = t.trim().toUpperCase();
+  return t;
+}
+
+function load(){
+  stop();
+  const n = +$("size").value;
+  const mem = Array(n).fill(0);
+  const lines = $("prog").value.split("\n").map(l=>l.trim()).filter(Boolean);
+  if(lines.length > n){ alert("Program is longer than memory. Increase memory size."); return; }
+  lines.forEach((l,i)=>mem[i]=parseCell(l));
+  $("data").value.split("\n").forEach(l=>{
+    const m = l.match(/^\s*(\d+)\s*=\s*(-?\d+)\s*$/);
+    if(m && +m[1] < n) mem[+m[1]] = +m[2];
+  });
+  S = {mem, PC:0, MAR:0, MDR:0, IR:"-", ACC:0, queue:[], halted:false, micro:0, done:0, changed:[], lastAcc:false};
+  $("log").innerHTML = "";
+  $("now").textContent = "Loaded. PC = 0. Press Step.";
+  setPhase(null);
+  draw();
+  log("Program loaded. Memory size = "+n+".", "");
+}
+
+/* ---------- Micro-operations ---------- */
+// Each micro-op = {phase, text, run()}. Fetch is always the same 4 operations.
+function fetchOps(){
+  return [
+    {p:"f", t:()=>`MAR <- PC   (MAR = ${S.PC})`, r:()=>{S.MAR=S.PC; return ["MAR"];}},
+    {p:"f", t:()=>`MDR <- Memory[MAR]   (Memory[${S.MAR}] = ${S.mem[S.MAR]})`, r:()=>{S.MDR=S.mem[S.MAR]; return ["MDR"];}},
+    {p:"f", t:()=>`IR <- MDR   (IR = ${S.MDR})`, r:()=>{S.IR=S.MDR; return ["IR"];}},
+    {p:"f", t:()=>`PC <- PC + 1   (PC = ${S.PC+1})`, r:()=>{S.PC++; return ["PC"];}},
+    {p:"d", t:()=>`Decode IR = "${S.IR}"`, r:decode}
+  ];
+}
+
+function decode(){
+  S.op = null; S.addr = null;
+  const m = String(S.IR).match(/^([A-Z]+)\s*(\d+)?$/);
+  const ops = ["LOAD","ADD","SUB","STORE","JUMP","JZ","HALT"];
+  if(!m || !ops.includes(m[1])){
+    S.halted = true; S.error = true;
+    S.queue = [{p:"e", t:()=>`Error: "${S.IR}" is not a valid instruction. CPU stops.`, r:()=>[]}];
+    return [];
+  }
+  const op = m[1], a = m[2]===undefined ? null : +m[2];
+  if(op!=="HALT" && (a===null || a >= S.mem.length)){
+    S.halted = true;
+    S.queue = [{p:"e", t:()=>`Error: operand missing or outside memory. CPU stops.`, r:()=>[]}];
+    return [];
+  }
+  S.op = op; S.addr = a;
+  const q = [];
+  const setMar = {p:"e", t:()=>`MAR <- operand   (MAR = ${a})`, r:()=>{S.MAR=a; return ["MAR"];}};
+  const readMdr = {p:"e", t:()=>`MDR <- Memory[MAR]   (Memory[${a}] = ${S.mem[a]})`, r:()=>{S.MDR=S.mem[S.MAR]; return ["MDR"];}};
+  if(op==="LOAD"){ q.push(setMar, readMdr, {p:"e", t:()=>`ACC <- MDR   (ACC = ${S.MDR})`, r:()=>{S.ACC=+S.MDR||0; return ["ACC"];}}); }
+  if(op==="ADD"||op==="SUB"){
+    const sign = op==="ADD"?"+":"-";
+    q.push(setMar, readMdr, {p:"e", t:()=>`ACC <- ACC ${sign} MDR   (${S.ACC} ${sign} ${+S.MDR||0} = ${op==="ADD"?S.ACC+(+S.MDR||0):S.ACC-(+S.MDR||0)})`,
+      r:()=>{S.ACC = op==="ADD" ? S.ACC+(+S.MDR||0) : S.ACC-(+S.MDR||0); return ["ACC"];}});
+  }
+  if(op==="STORE"){ q.push(setMar,
+    {p:"e", t:()=>`MDR <- ACC   (MDR = ${S.ACC})`, r:()=>{S.MDR=S.ACC; return ["MDR"];}},
+    {p:"e", t:()=>`Memory[MAR] <- MDR   (Memory[${a}] = ${S.MDR})`, r:()=>{S.mem[S.MAR]=S.MDR; S.written=S.MAR; return ["MEM"];}}); }
+  if(op==="JUMP"){ q.push({p:"e", t:()=>`PC <- operand   (PC = ${a})`, r:()=>{S.PC=a; return ["PC"];}}); }
+  if(op==="JZ"){ q.push({p:"e", t:()=> S.ACC===0 ? `ACC is 0, so PC <- ${a}` : `ACC is ${S.ACC} (not 0), so PC is unchanged`, r:()=>{ if(S.ACC===0){S.PC=a; return ["PC"];} return []; }}); }
+  if(op==="HALT"){ q.push({p:"e", t:()=>`HALT: CPU stops.`, r:()=>{S.halted=true; return [];}}); }
+  S.queue = q.concat([{p:"end"}]);   // marker: instruction finished
+  return [];
+}
+
+/* ---------- Stepping ---------- */
+function step(){
+  if(!S) load();
+  if(S.halted && S.queue.length===0){ stop(); log("CPU has halted. Press Load / Reset to run again.", ""); return; }
+  if(S.queue.length===0){
+    S.queue = fetchOps();
+    log(`--- Instruction ${S.done+1} begins (PC = ${S.PC}) ---`, "");
+  }
+  let op = S.queue.shift();
+  if(op.p==="end"){ S.done++; if(S.queue.length===0 && !S.halted){ return step(); } draw(); return; }
+  const text = op.t();                 // describe using values BEFORE the change
+  const dec = op.p==="d";
+  const before = S.queue.length;
+  const changed = op.r() || [];
+  if(dec && S.op){                     // after decode, show what was decoded
+    log(`${labelOf(op.p)}: ${text} -> opcode ${S.op}${S.addr!==null?", operand "+S.addr:""}`, op.p);
+  } else log(`${labelOf(op.p)}: ${text}`, op.p);
+  S.micro++; S.changed = changed;
+  setPhase(op.p);
+  $("now").textContent = labelOf(op.p)+": "+text;
+  if(S.queue.length && S.queue[0].p==="end" && S.queue.length===1){ S.queue.shift(); S.done++; if(S.halted){ log("*** CPU halted. Final ACC = "+S.ACC+" ***","e"); stop(); } }
+  else if(S.halted && !S.queue.length){ stop(); }
+  draw();
+}
+function labelOf(p){ return p==="f"?"FETCH":p==="d"?"DECODE":"EXECUTE"; }
+function setPhase(p){
+  $("pf").className="ph f"+(p==="f"?" on":"");
+  $("pd").className="ph d"+(p==="d"?" on":"");
+  $("pe").className="ph e"+(p==="e"?" on":"");
+}
+function run(){ if(timer) return; if(!S) load(); timer=setInterval(step, +$("speed").value); }
+function stop(){ clearInterval(timer); timer=null; }
+
+/* ---------- Display ---------- */
+function log(msg, cls){
+  const d=document.createElement("div");
+  d.className = cls==="f"?"lf":cls==="d"?"ld":cls==="e"?"le":"";
+  d.textContent=msg; $("log").appendChild(d); $("log").scrollTop=1e9;
+}
+function draw(){
+  $("regs").innerHTML = REGS.map(r=>`<div class="reg ${S.changed.includes(r)?"chg":""}"><b>${r}</b><span>${S[r]}</span></div>`).join("");
+  $("mem").innerHTML = S.mem.map((v,i)=>`<div class="cell ${i===S.PC?"pc":""} ${S.changed.includes("MEM")&&S.written===i?"acc":""}"><i>${i}</i>${v}</div>`).join("");
+  $("stats").textContent = `Instructions done: ${S.done} | Micro-steps: ${S.micro}`;
+}
+
+$("load").onclick = load;
+$("step").onclick = step;
+$("run").onclick = run;
+$("stop").onclick = stop;
+$("size").onchange = load;
+$("speed").oninput = e => { $("spv").textContent = e.target.value; if(timer){ stop(); run(); } };
+load();
+</script>
+</body>
+</html>
